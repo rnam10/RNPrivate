@@ -129,6 +129,19 @@ def read_gl_dump(filepath: str) -> pd.DataFrame:
 
     # Strip whitespace from column names
     df.columns = [str(c).strip() for c in df.columns]
+
+    # De-duplicate column names (Oracle GL exports sometimes have repeated headers)
+    seen: dict[str, int] = {}
+    new_cols = []
+    for col in df.columns:
+        if col in seen:
+            seen[col] += 1
+            new_cols.append(f"{col}_{seen[col]}")
+        else:
+            seen[col] = 0
+            new_cols.append(col)
+    df.columns = new_cols
+
     return df
 
 
@@ -155,12 +168,13 @@ def build_clean_df(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list[str]]:
     rename = {raw: canon for raw, canon in col_map.items()}
     clean = df.rename(columns=rename).copy()
 
-    # Ensure amount columns are numeric
+    # Ensure amount columns are numeric (guard against duplicate-column DataFrames)
     for ac in amount_cols:
-        clean[ac] = pd.to_numeric(clean[ac], errors="coerce").fillna(0)
+        if ac in clean.columns and isinstance(clean[ac], pd.Series):
+            clean[ac] = pd.to_numeric(clean[ac], errors="coerce").fillna(0)
 
     # If Ending_Bal_USD exists, make sure it's numeric
-    if "Ending_Bal_USD" in clean.columns:
+    if "Ending_Bal_USD" in clean.columns and isinstance(clean["Ending_Bal_USD"], pd.Series):
         clean["Ending_Bal_USD"] = pd.to_numeric(clean["Ending_Bal_USD"], errors="coerce").fillna(0)
 
     # Add a Total_Amount helper (sum of all detected amount cols)
@@ -320,7 +334,12 @@ def _add_table(writer, df: pd.DataFrame, sheet_name: str, title: str,
 
     # Auto‑width & number format
     for col_idx, col_name in enumerate(df.columns):
-        max_len = max(len(str(col_name)), df[col_name].astype(str).str.len().max() if len(df) > 0 else 0)
+        col_data = df[col_name]
+        if len(df) > 0 and isinstance(col_data, pd.Series):
+            max_val_len = col_data.astype(str).str.len().max()
+        else:
+            max_val_len = 0
+        max_len = max(len(str(col_name)), int(max_val_len) if pd.notna(max_val_len) else 0)
         max_len = min(max_len + 3, 45)
         is_numeric = pd.api.types.is_numeric_dtype(df[col_name])
 
