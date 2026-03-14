@@ -168,18 +168,21 @@ def build_clean_df(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list[str]]:
     rename = {raw: canon for raw, canon in col_map.items()}
     clean = df.rename(columns=rename).copy()
 
-    # Ensure amount columns are numeric (guard against duplicate-column DataFrames)
+    # Ensure ALL amount columns are forced to numeric (handles mixed str/int data)
     for ac in amount_cols:
-        if ac in clean.columns and isinstance(clean[ac], pd.Series):
+        if ac in clean.columns:
             clean[ac] = pd.to_numeric(clean[ac], errors="coerce").fillna(0)
 
     # If Ending_Bal_USD exists, make sure it's numeric
-    if "Ending_Bal_USD" in clean.columns and isinstance(clean["Ending_Bal_USD"], pd.Series):
+    if "Ending_Bal_USD" in clean.columns:
         clean["Ending_Bal_USD"] = pd.to_numeric(clean["Ending_Bal_USD"], errors="coerce").fillna(0)
 
+    # Filter amount_cols to only those that actually exist in clean
+    valid_amount_cols = [c for c in amount_cols if c in clean.columns]
+
     # Add a Total_Amount helper (sum of all detected amount cols)
-    if amount_cols:
-        clean["Total_Amount"] = clean[amount_cols].sum(axis=1)
+    if valid_amount_cols:
+        clean["Total_Amount"] = clean[valid_amount_cols].sum(axis=1)
     elif "Ending_Bal_USD" in clean.columns:
         clean["Total_Amount"] = clean["Ending_Bal_USD"]
     else:
